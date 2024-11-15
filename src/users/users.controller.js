@@ -1,8 +1,9 @@
 import { Sequelize, DataTypes, Model, useInflection } from 'sequelize';
 import bcrypt from 'bcryptjs';
 import User from './users.model.js';
-import jwt from 'jsonwebtoken';
+import jwt, { decode } from 'jsonwebtoken';
 import { config } from '../../config.js';
+import nodemailer from 'nodemailer';
 
 const ACCESS_TOKEN_EXPIRES = '10m'; // 15 минут
 const REFRESH_TOKEN_EXPIRES = '30d'; // 30 дней
@@ -11,32 +12,95 @@ class UsersController {
   async register(req, res) {
     const { name, surname, email, password } = req.body;
 
-    if (
-      typeof name !== 'string' ||
-      typeof surname !== 'string' ||
-      typeof email !== 'string' ||
-      typeof password !== 'string'
-    ) {
-      return res.status(400).json({ error: 'Invalid data format' });
+    if (!name || !surname || !email || !password) {
+      return res.status(400).json({ error: 'All fields are required' });
     }
 
     try {
+      // Хешируем пароль
       const hashedPassword = await bcrypt.hash(password, 10);
 
+      // Создаем пользователя с статусом "inactive"
       const newUser = await User.create({
         name,
         surname,
         email,
         password: hashedPassword,
+        status: 'inactive',
       });
 
-      res.status(201).json({ message: 'User registered successfully' });
+      // Генерируем токен для подтверждения email
+      const token = jwt.sign(
+        { userId: newUser.id },
+        config.EMAIL_CONFIRM_SECRET,
+        { expiresIn: '1h' }
+      );
+
+      // Отправляем письмо с подтверждением
+      const transporter = nodemailer.createTransport({
+        host: 'smtp.yandex.ru',
+        port: 465,
+        secure: true,
+        auth: {
+          user: config.EMAIL,
+          pass: config.EMAIL_PASSWORD,
+        },
+        debug: true, // Включаем отладку
+        logger: true, // Логи работы SMTP
+      });
+
+      const confirmUrl = `http://localhost:3001/api/users/confirm/${token}`;
+
+      const mailOptions = {
+        from: config.EMAIL,
+        to: newUser.email,
+        subject: 'Confirm your email',
+        html: `<p>Click the link to confirm your registration: <a href="${confirmUrl}">Confirm Email</a></p>`,
+      };
+
+      transporter.sendMail(mailOptions, (error, info) => {
+        if (error) {
+          console.error('Error sending email:', error);
+          return res
+            .status(500)
+            .json({ error: 'Error sending confirmation email' });
+        } else {
+          res.status(201).json({
+            message:
+              'Registration successful! Please check your email to confirm.',
+          });
+        }
+      });
     } catch (error) {
-      if (error.name === 'SequelizeUniqueConstraintError') {
-        res.status(400).json({ error: 'Email already exists' });
-      } else {
-        res.status(500).json({ error: error.message });
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  async confirmEmail(req, res) {
+    const { token } = req.params;
+
+    try {
+      // Проверяем токен
+      const decoded = jwt.verify(token, config.EMAIL_CONFIRM_SECRET);
+      const user = await User.findOne({
+        where: { status: 'inactive', id: decoded.userId },
+      });
+
+      if (!user) {
+        return res.status(404).json({ error: 'Incorrect token' });
       }
+
+      // Обновляем статус пользователя на "active"
+      if (user.status === 'active') {
+        return res.status(400).json({ message: 'User is already active' });
+      }
+
+      user.status = 'active';
+      await user.save();
+
+      res.json({ message: 'Email confirmed! Your account is now active.' });
+    } catch (error) {
+      res.status(500).json({ error: 'Invalid or expired token' });
     }
   }
 
@@ -46,8 +110,10 @@ class UsersController {
     try {
       const user = await User.findOne({ where: { email } });
 
-      if (!user) {
-        return res.status(401).json({ error: 'Invalid email or password' });
+      if (!user || user.status !== 'active') {
+        return res
+          .status(401)
+          .json({ error: 'Account is not activated or user does not exist' });
       }
 
       const isPasswordValid = await bcrypt.compare(password, user.password);

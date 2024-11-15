@@ -15,7 +15,22 @@ const storage = multer.diskStorage({
     cb(null, `${uniqueId}${extension}`); // Задаем уникальное имя для файла
   },
 });
-const upload = multer({ storage: storage });
+
+// Функция для проверки формата файла
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png']; // Допустимые MIME-типы
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true); // Разрешить файл
+  } else {
+    cb(new Error('Only .jpg, .jpeg, and .png formats are allowed'), false); // Отклонить файл
+  }
+};
+
+// Инициализируем multer с проверкой типа файла
+const upload = multer({
+  storage: storage,
+  fileFilter: fileFilter, // Применяем проверку формата файла
+});
 
 const postsRouter = new Router();
 

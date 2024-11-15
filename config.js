@@ -7,4 +7,7 @@ export const config = {
   HOST: process.env.HOST,
   PORT: process.env.PORT,
   TABLE: process.env.TABLE,
+  EMAIL_CONFIRM_SECRET: process.env.EMAIL_CONFIRM_SECRET,
+  EMAIL: process.env.EMAIL,
+  EMAIL_PASSWORD: process.env.EMAIL_PASSWORD,
 };

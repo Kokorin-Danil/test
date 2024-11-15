@@ -5,6 +5,7 @@ import middlewaresController from '../middlewares/middlewares.controller.js';
 const usersRouter = new Router();
 
 usersRouter.post('/register', usersController.register);
+usersRouter.get('/confirm/:token', usersController.confirmEmail); // Маршрут для подтверждения email
 usersRouter.post('/login', usersController.login);
 usersRouter.post('/refresh', usersController.refresh);
 usersRouter.get(

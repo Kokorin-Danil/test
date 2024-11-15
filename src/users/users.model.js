@@ -30,6 +30,10 @@ User.init(
       defaultValue: 'user',
       allowNull: false,
     },
+    status: {
+      type: DataTypes.ENUM('active', 'inactive'), // Добавляем поле для статуса
+      defaultValue: 'inactive', // Изначально пользователь не активен
+    },
   },
   {
     sequelize: dbPosts,
