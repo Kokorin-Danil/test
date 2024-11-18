@@ -35,7 +35,7 @@ const upload = multer({
 const postsRouter = new Router();
 
 postsRouter.get('/', postsController.getPosts);
-postsRouter.get('/:id', postsController.getPostById);
+postsRouter.get('/:postId', postsController.viewPost);
 postsRouter.post(
   '/',
   middlewaresController.authenticateToken, // Проверка токена
@@ -47,6 +47,11 @@ postsRouter.put(
   middlewaresController.authenticateToken, // Проверка токена
   upload.single('file'), // Обработка файла
   postsController.updatePost // Метод для обновления поста
+);
+postsRouter.post(
+  '/:postId/like',
+  middlewaresController.authenticateToken, // Проверка токена
+  postsController.toggleLike // Переключение лайка
 );
 
 export default postsRouter;

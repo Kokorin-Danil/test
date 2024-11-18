@@ -26,6 +26,14 @@ Posts.init(
       },
       onDelete: 'CASCADE', // Удаление поста при удалении пользователя
     },
+    views: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0,
+    },
+    likes: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0, // Начальное значение для лайков
+    },
   },
   {
     sequelize: dbPosts,
@@ -39,12 +47,12 @@ Posts.init(
 User.hasMany(Posts, { foreignKey: 'userId' });
 Posts.belongsTo(User, { foreignKey: 'id' });
 
-Posts.sync({ alter: true })
-  .then(() => {
-    console.log('Posts table created successfully with userId!');
-  })
-  .catch((err) => {
-    console.error('Error creating Posts table:', err);
-  });
+// Posts.sync()
+//   .then(() => {
+//     console.log('Posts table created successfully with userId!');
+//   })
+//   .catch((err) => {
+//     console.error('Error creating Posts table:', err);
+//   });
 
 export default Posts;

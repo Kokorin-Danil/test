@@ -6,6 +6,10 @@ const usersRouter = new Router();
 
 usersRouter.post('/register', usersController.register);
 usersRouter.get('/confirm/:token', usersController.confirmEmail); // Маршрут для подтверждения email
+usersRouter.post(
+  '/resend-confirmation',
+  usersController.resendConfirmationEmail
+);
 usersRouter.post('/login', usersController.login);
 usersRouter.post('/refresh', usersController.refresh);
 usersRouter.get(
@@ -23,5 +27,4 @@ usersRouter.put(
   middlewaresController.authenticateToken, // Проверка токена
   usersController.updateProfile // Метод для обновления профиля
 );
-
 export default usersRouter;

@@ -43,12 +43,12 @@ User.init(
   }
 );
 
-User.sync({ alter: true })
-  .then(() => {
-    console.log('User table created successfully');
-  })
-  .catch((err) => {
-    console.error('Error creating User table:', err);
-  });
+// User.sync()
+//   .then(() => {
+//     console.log('User table created successfully');
+//   })
+//   .catch((err) => {
+//     console.error('Error creating User table:', err);
+//   });
 
 export default User;

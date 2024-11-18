@@ -4,6 +4,7 @@ import User from './users.model.js';
 import jwt, { decode } from 'jsonwebtoken';
 import { config } from '../../config.js';
 import nodemailer from 'nodemailer';
+import ConfirmationToken from './confirmationToken.model.js';
 
 const ACCESS_TOKEN_EXPIRES = '10m'; // 15 минут
 const REFRESH_TOKEN_EXPIRES = '30d'; // 30 дней
@@ -12,15 +13,10 @@ class UsersController {
   async register(req, res) {
     const { name, surname, email, password } = req.body;
 
-    if (!name || !surname || !email || !password) {
-      return res.status(400).json({ error: 'All fields are required' });
-    }
-
     try {
-      // Хешируем пароль
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      // Создаем пользователя с статусом "inactive"
+      // Создаем пользователя
       const newUser = await User.create({
         name,
         surname,
@@ -29,14 +25,22 @@ class UsersController {
         status: 'inactive',
       });
 
-      // Генерируем токен для подтверждения email
+      // Генерируем токен с временем жизни 5 минут
       const token = jwt.sign(
         { userId: newUser.id },
         config.EMAIL_CONFIRM_SECRET,
-        { expiresIn: '1h' }
+        { expiresIn: '5m' }
       );
 
-      // Отправляем письмо с подтверждением
+      // Сохраняем токен в базе данных
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // Токен действует 5 минут
+      await ConfirmationToken.create({
+        token,
+        userId: newUser.id,
+        expiresAt,
+      });
+
+      // Отправляем письмо
       const transporter = nodemailer.createTransport({
         host: 'smtp.yandex.ru',
         port: 465,
@@ -45,31 +49,18 @@ class UsersController {
           user: config.EMAIL,
           pass: config.EMAIL_PASSWORD,
         },
-        debug: true, // Включаем отладку
-        logger: true, // Логи работы SMTP
       });
 
       const confirmUrl = `http://localhost:3001/api/users/confirm/${token}`;
-
-      const mailOptions = {
+      await transporter.sendMail({
         from: config.EMAIL,
         to: newUser.email,
         subject: 'Confirm your email',
-        html: `<p>Click the link to confirm your registration: <a href="${confirmUrl}">Confirm Email</a></p>`,
-      };
+        html: `<p>Click the link to confirm your email: <a href="${confirmUrl}">Confirm Email</a></p>`,
+      });
 
-      transporter.sendMail(mailOptions, (error, info) => {
-        if (error) {
-          console.error('Error sending email:', error);
-          return res
-            .status(500)
-            .json({ error: 'Error sending confirmation email' });
-        } else {
-          res.status(201).json({
-            message:
-              'Registration successful! Please check your email to confirm.',
-          });
-        }
+      res.status(201).json({
+        message: 'Registration successful! Please check your email to confirm.',
       });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -80,27 +71,114 @@ class UsersController {
     const { token } = req.params;
 
     try {
-      // Проверяем токен
-      const decoded = jwt.verify(token, config.EMAIL_CONFIRM_SECRET);
-      const user = await User.findOne({
-        where: { status: 'inactive', id: decoded.userId },
+      // Ищем токен в базе данных
+      const confirmationToken = await ConfirmationToken.findOne({
+        where: { token },
       });
 
-      if (!user) {
-        return res.status(404).json({ error: 'Incorrect token' });
+      if (!confirmationToken) {
+        return res.status(404).json({ error: 'Invalid or expired token' });
       }
 
-      // Обновляем статус пользователя на "active"
-      if (user.status === 'active') {
-        return res.status(400).json({ message: 'User is already active' });
+      // Проверяем, не истёк ли токен
+      if (confirmationToken.expiresAt < new Date()) {
+        return res.status(400).json({ error: 'Token has expired' });
+      }
+
+      // Активируем пользователя
+      const user = await User.findByPk(confirmationToken.userId);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
       }
 
       user.status = 'active';
       await user.save();
 
-      res.json({ message: 'Email confirmed! Your account is now active.' });
+      // Удаляем токен после использования
+      await confirmationToken.destroy();
+
+      res.json({
+        message: 'Email confirmed successfully! Your account is now active.',
+      });
     } catch (error) {
-      res.status(500).json({ error: 'Invalid or expired token' });
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  async resendConfirmationEmail(req, res) {
+    const { email } = req.body;
+
+    try {
+      // Проверяем, существует ли пользователь
+      const user = await User.findOne({ where: { email } });
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      // Проверяем, активирован ли пользователь
+      if (user.status === 'active') {
+        return res.status(400).json({ error: 'User is already active' });
+      }
+
+      if (!email) {
+        return res.status(400).json({ error: 'Email is required' });
+      }
+
+      // Ищем существующий токен
+      const existingToken = await ConfirmationToken.findOne({
+        where: { userId: user.id },
+      });
+
+      if (existingToken) {
+        // Если токен истёк, удаляем его
+        if (existingToken.expiresAt < new Date()) {
+          await existingToken.destroy();
+        } else {
+          // Если токен всё ещё активен, возвращаем сообщение
+          return res.status(400).json({
+            error: 'A confirmation email was already sent. Please wait.',
+          });
+        }
+      }
+
+      // Генерируем новый токен
+      const token = jwt.sign({ userId: user.id }, config.EMAIL_CONFIRM_SECRET, {
+        expiresIn: '5m',
+      });
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // Токен действует 5 минут
+
+      // Сохраняем новый токен в базе данных
+      await ConfirmationToken.create({
+        token,
+        userId: user.id,
+        expiresAt,
+      });
+
+      // Отправляем письмо с подтверждением
+      const transporter = nodemailer.createTransport({
+        host: 'smtp.yandex.ru',
+        port: 465,
+        secure: true,
+        auth: {
+          user: config.EMAIL,
+          pass: config.EMAIL_PASSWORD,
+        },
+      });
+
+      const confirmUrl = `http://localhost:3001/api/users/confirm/${token}`;
+      await transporter.sendMail({
+        from: config.EMAIL,
+        to: user.email,
+        subject: 'Confirm your email',
+        html: `<p>Click the link to confirm your email: <a href="${confirmUrl}">Confirm Email</a></p>`,
+      });
+
+      res
+        .status(200)
+        .json({ message: 'Confirmation email sent successfully!' });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
     }
   }
 
