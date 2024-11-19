@@ -1,10 +1,9 @@
 import { Sequelize, DataTypes, Model, useInflection } from 'sequelize';
 import bcrypt from 'bcryptjs';
-import User from './users.model.js';
+import User, { ConfirmationToken } from './users.model.js';
 import jwt, { decode } from 'jsonwebtoken';
 import { config } from '../../config.js';
 import nodemailer from 'nodemailer';
-import ConfirmationToken from './confirmationToken.model.js';
 
 const ACCESS_TOKEN_EXPIRES = '10m'; // 15 минут
 const REFRESH_TOKEN_EXPIRES = '30d'; // 30 дней

@@ -4,21 +4,8 @@ import path from 'path';
 import uniqid from 'uniqid';
 import fs from 'fs';
 import { broadcastNewPost } from '../../index.js';
-import PostView from './PostView.model.js';
-import PostLike from './PostLike.model.js';
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'public/uploads');
-  },
-  filename: (req, file, cb) => {
-    const extension = path.extname(file.originalname);
-    const uniqueId = uniqid();
-    cb(null, `${uniqueId}${extension}`);
-  },
-});
-
-const upload = multer({ storage: storage });
+import Activity from '../activity/activity.model.js';
+import upload from '../../utils/multerConfig.js';
 
 class PostsController {
   async getPosts(req, res) {
@@ -33,6 +20,7 @@ class PostsController {
   async viewPost(req, res) {
     const { postId } = req.params;
     const ip = req.ip; // Получаем IP клиента
+    const userId = req.user ? req.user.userId : null; // Получаем ID пользователя (если авторизован)
 
     try {
       const post = await Posts.findByPk(postId);
@@ -41,13 +29,21 @@ class PostsController {
         return res.status(404).json({ error: 'Post not found' });
       }
 
-      // Проверяем, был ли этот IP-адрес зарегистрирован
-      const [view, created] = await PostView.findOrCreate({
-        where: { postId, ip },
+      // Проверяем, был ли этот IP-адрес уже зарегистрирован для данного поста
+      const existingView = await Activity.findOne({
+        where: { postId, ip, type: 'view' },
       });
 
-      if (created) {
-        // Если запись уникальна, увеличиваем счётчик просмотров
+      if (!existingView) {
+        // Если записи нет, увеличиваем количество просмотров
+        await Activity.create({
+          userId, // Добавляем ID пользователя, если авторизован
+          postId,
+          type: 'view',
+          ip,
+        });
+
+        // Увеличиваем счётчик просмотров в модели Posts
         post.views += 1;
         await post.save();
       }
@@ -166,35 +162,6 @@ class PostsController {
         fs.unlinkSync(path.join('public', 'uploads', req.file.filename));
       }
       res.status(500).json({ error: error.message }); // Отправляем ошибку
-    }
-  }
-  async toggleLike(req, res) {
-    const { postId } = req.params;
-    const userId = req.user.userId;
-
-    try {
-      const post = await Posts.findByPk(postId);
-      if (!post) {
-        return res.status(404).json({ error: 'Post not found' });
-      }
-
-      const existingLike = await PostLike.findOne({
-        where: { postId, userId },
-      });
-
-      if (existingLike) {
-        await existingLike.destroy();
-        post.likes -= 1; // Уменьшаем счётчик лайков
-        await post.save();
-        return res.status(200).json({ message: 'Like removed successfully' });
-      } else {
-        await PostLike.create({ postId, userId });
-        post.likes += 1; // Увеличиваем счётчик лайков
-        await post.save();
-        return res.status(201).json({ message: 'Post liked successfully' });
-      }
-    } catch (error) {
-      res.status(500).json({ error: error.message });
     }
   }
 }

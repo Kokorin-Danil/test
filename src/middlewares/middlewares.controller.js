@@ -29,11 +29,4 @@ const authorizeRole = (role) => (req, res, next) => {
   }
 };
 
-const handleFileError = async (err, req, res, next) => {
-  if (req.file) {
-    await fs.unlink(path.join('public', 'uploads', req.file.filename));
-  }
-  next(err); // Передаём ошибку дальше
-};
-
-export default { authenticateToken, authorizeRole, handleFileError };
+export default { authenticateToken, authorizeRole };

@@ -1,4 +1,4 @@
-import { Sequelize, DataTypes, Model, useInflection } from 'sequelize';
+import { Sequelize, DataTypes, Model } from 'sequelize';
 import dbPosts from '../../db.js';
 
 class User extends Model {}
@@ -16,6 +16,7 @@ User.init(
     email: {
       type: DataTypes.STRING,
       allowNull: false,
+      unique: true, // Уникальность email
     },
     password: {
       type: DataTypes.STRING,
@@ -31,8 +32,8 @@ User.init(
       allowNull: false,
     },
     status: {
-      type: DataTypes.ENUM('active', 'inactive'), // Добавляем поле для статуса
-      defaultValue: 'inactive', // Изначально пользователь не активен
+      type: DataTypes.ENUM('active', 'inactive'),
+      defaultValue: 'inactive',
     },
   },
   {
@@ -43,12 +44,32 @@ User.init(
   }
 );
 
-// User.sync()
-//   .then(() => {
-//     console.log('User table created successfully');
-//   })
-//   .catch((err) => {
-//     console.error('Error creating User table:', err);
-//   });
+class ConfirmationToken extends Model {}
+
+ConfirmationToken.init(
+  {
+    token: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    expiresAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
+  },
+  {
+    sequelize: dbPosts,
+    modelName: 'ConfirmationToken',
+    tableName: 'confirmation_tokens',
+  }
+);
+
+// Связь: один пользователь может иметь несколько токенов
+User.hasMany(ConfirmationToken, {
+  foreignKey: 'userId',
+  as: 'confirmationTokens',
+});
+ConfirmationToken.belongsTo(User, { foreignKey: 'id' });
 
 export default User;
+export { ConfirmationToken };
