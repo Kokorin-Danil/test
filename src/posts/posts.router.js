@@ -44,9 +44,9 @@ postsRouter.post(
 );
 postsRouter.put(
   '/:id',
-  middlewaresController.authenticateToken, // Проверка токена
-  upload.single('file'), // Обработка файла
-  postsController.updatePost // Метод для обновления поста
+  middlewaresController.authenticateToken,
+  upload.single('file'),
+  postsController.updatePost
 );
 postsRouter.post(
   '/:postId/like',

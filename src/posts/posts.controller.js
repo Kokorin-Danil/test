@@ -124,11 +124,18 @@ class PostsController {
       const post = await Posts.findByPk(postId);
 
       if (!post) {
+        // Если пост не найден, удаляем файл, если он был загружен
+        if (req.file) {
+          fs.unlinkSync(path.join('public', 'uploads', req.file.filename));
+        }
         return res.status(404).json({ error: 'Post not found' });
       }
 
       // Проверяем права доступа (только автор или админ может редактировать)
       if (userRole !== 'admin' && post.userId !== userId) {
+        if (req.file) {
+          fs.unlinkSync(path.join('public', 'uploads', req.file.filename));
+        }
         return res
           .status(403)
           .json({ error: 'You do not have permission to edit this post' });
@@ -136,43 +143,31 @@ class PostsController {
 
       // Если был загружен новый файл
       if (req.file) {
-        try {
-          // Удаляем старый файл, если он существует
-          if (post.file) {
-            const oldFilePath = path.join('public', post.file);
-            if (fs.existsSync(oldFilePath)) {
-              fs.unlinkSync(oldFilePath); // Удаляем старый файл
-            }
+        // Удаляем старый файл, если он существует
+        if (post.file) {
+          const oldFilePath = path.join('public', post.file);
+          if (fs.existsSync(oldFilePath)) {
+            fs.unlinkSync(oldFilePath);
           }
-
-          // Обновляем данные поста, включая новый файл
-          post.file = `/uploads/${req.file.filename}`;
-        } catch (fileError) {
-          return res
-            .status(500)
-            .json({ error: 'Error while processing the file' });
         }
+        post.file = `/uploads/${req.file.filename}`;
       }
 
-      // Обновляем остальные данные поста
-      post.label = label || post.label;
-      post.text = text || post.text;
+      // Обновляем другие данные поста
+      if (label) post.label = label;
+      if (text) post.text = text;
 
       await post.save(); // Сохраняем изменения
 
-      res.json({ message: 'Post updated successfully', post });
+      res.status(200).json(post); // Отправляем обновлённый пост
     } catch (error) {
-      if (error.name === 'SequelizeValidationError') {
-        // Если ошибка связана с валидацией в Sequelize
-        return res
-          .status(400)
-          .json({ error: error.errors.map((err) => err.message).join(', ') });
+      // Если произошла ошибка, удаляем загруженный файл
+      if (req.file) {
+        fs.unlinkSync(path.join('public', 'uploads', req.file.filename));
       }
-
-      res.status(500).json({ error: 'An unexpected error occurred' });
+      res.status(500).json({ error: error.message }); // Отправляем ошибку
     }
   }
-
   async toggleLike(req, res) {
     const { postId } = req.params;
     const userId = req.user.userId;

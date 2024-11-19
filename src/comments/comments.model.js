@@ -29,6 +29,19 @@ Comments.init(
       },
       onDelete: 'CASCADE',
     },
+    likeCount: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0, // Начальное значение
+    },
+    parentCommentId: {
+      type: DataTypes.INTEGER,
+      allowNull: true, // null означает, что это не ответ, а корневой комментарий
+      references: {
+        model: Comments, // Ссылка на ту же таблицу
+        key: 'id',
+      },
+      onDelete: 'CASCADE',
+    },
   },
   {
     sequelize: dbPosts,
@@ -42,5 +55,7 @@ Posts.hasMany(Comments, { foreignKey: 'postId' });
 Comments.belongsTo(Posts, { foreignKey: 'postId' });
 User.hasMany(Comments, { foreignKey: 'userId' });
 Comments.belongsTo(User, { foreignKey: 'userId' });
+Comments.hasMany(Comments, { foreignKey: 'parentCommentId', as: 'replies' });
+Comments.belongsTo(Comments, { foreignKey: 'parentCommentId', as: 'parent' });
 
 export default Comments;

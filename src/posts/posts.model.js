@@ -34,6 +34,10 @@ Posts.init(
       type: DataTypes.INTEGER,
       defaultValue: 0, // Начальное значение для лайков
     },
+    commentCount: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0, // Изначально у поста нет комментариев
+    },
   },
   {
     sequelize: dbPosts,

@@ -11,10 +11,14 @@ commentsRouter.post(
 );
 commentsRouter.get('/:postId', commentsController.getComments);
 commentsRouter.post(
-  '/comments/:commentId/like',
+  '/:commentId/like',
   middlewaresController.authenticateToken,
-  commentsController.isUserActivated,
   commentsController.likeComment
+);
+commentsRouter.post(
+  '/:commentId/reply', // Маршрут для ответа на комментарий
+  middlewaresController.authenticateToken, // Проверка авторизации
+  commentsController.replyToComment // Контроллер для ответа
 );
 
 export default commentsRouter;

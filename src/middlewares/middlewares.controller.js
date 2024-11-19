@@ -1,5 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { config } from '../../config.js';
+import fs from 'fs/promises';
+import path from 'path';
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -27,4 +29,11 @@ const authorizeRole = (role) => (req, res, next) => {
   }
 };
 
-export default { authenticateToken, authorizeRole };
+const handleFileError = async (err, req, res, next) => {
+  if (req.file) {
+    await fs.unlink(path.join('public', 'uploads', req.file.filename));
+  }
+  next(err); // Передаём ошибку дальше
+};
+
+export default { authenticateToken, authorizeRole, handleFileError };
