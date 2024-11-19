@@ -4,10 +4,16 @@ import middlewaresController from '../middlewares/middlewares.controller.js';
 import multer from 'multer';
 import uniqid from 'uniqid';
 import path from 'path';
+import fs from 'fs';
+
+const uploadDir = path.join('public', 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'public/uploads'); // Указываем папку для загрузки файлов
+    cb(null, uploadDir); // Указываем папку для загрузки файлов
   },
   filename: (req, file, cb) => {
     const extension = path.extname(file.originalname); // Получаем расширение файла
