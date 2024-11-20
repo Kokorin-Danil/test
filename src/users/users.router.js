@@ -27,4 +27,9 @@ usersRouter.put(
   middlewaresController.authenticateToken, // Проверка токена
   usersController.updateProfile // Метод для обновления профиля
 );
+usersRouter.get(
+  '/weather',
+  middlewaresController.authenticateToken, // Проверяем токен
+  usersController.getWeatherForUser // Обработчик
+);
 export default usersRouter;

@@ -9,11 +9,38 @@ import upload from '../../utils/multerConfig.js';
 
 class PostsController {
   async getPosts(req, res) {
+    const { page = 1, limit = 5 } = req.query; // Устанавливаем 5 постов на странице по умолчанию
+
+    const limitInt = parseInt(limit, 10) || 5; // Лимит постов (по умолчанию 5)
+    const offset = (parseInt(page, 10) - 1) * limitInt; // Смещение для текущей страницы
+
     try {
-      const posts = await Posts.findAll();
-      res.json(posts);
+      // Получаем общее количество постов
+      const totalPosts = await Posts.count();
+
+      // Получаем посты для текущей страницы
+      const posts = await Posts.findAll({
+        limit: limitInt, // Лимит постов
+        offset, // Смещение
+        order: [['createdAt', 'DESC']], // Сортировка по дате создания (последние посты первыми)
+      });
+
+      // Вычисляем общее количество страниц
+      const totalPages = Math.ceil(totalPosts / limitInt);
+
+      // Возвращаем посты и мета-данные для пагинации
+      res.status(200).json({
+        posts,
+        meta: {
+          totalPosts,
+          currentPage: parseInt(page, 10),
+          totalPages,
+          limit: limitInt,
+        },
+      });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      console.error('Error fetching paginated posts:', error);
+      res.status(500).json({ error: 'Error while fetching paginated posts' });
     }
   }
 

@@ -10,4 +10,5 @@ export const config = {
   EMAIL_CONFIRM_SECRET: process.env.EMAIL_CONFIRM_SECRET,
   EMAIL: process.env.EMAIL,
   EMAIL_PASSWORD: process.env.EMAIL_PASSWORD,
+  WEATHER_API_KEY: '7aa1c8602ca49506c8ba7266afb761c5',
 };

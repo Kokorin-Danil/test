@@ -16,7 +16,6 @@ User.init(
     email: {
       type: DataTypes.STRING,
       allowNull: false,
-      unique: true, // Уникальность email
     },
     password: {
       type: DataTypes.STRING,
@@ -34,6 +33,10 @@ User.init(
     status: {
       type: DataTypes.ENUM('active', 'inactive'),
       defaultValue: 'inactive',
+    },
+    city: {
+      type: DataTypes.STRING,
+      allowNull: true, // Пользователь может не указать город
     },
   },
   {
@@ -69,7 +72,7 @@ User.hasMany(ConfirmationToken, {
   foreignKey: 'userId',
   as: 'confirmationTokens',
 });
-ConfirmationToken.belongsTo(User, { foreignKey: 'id' });
+ConfirmationToken.belongsTo(User, { foreignKey: 'userId' });
 
 export default User;
 export { ConfirmationToken };

@@ -43,5 +43,9 @@ activityRouter.get(
   '/:id/likeCountComment',
   activityController.getLikeCountOnComment
 );
+activityRouter.get(
+  '/:postId/:commentId/comments-or-replies',
+  activityController.getCommentsAndRepliesForPost
+);
 
 export default activityRouter;

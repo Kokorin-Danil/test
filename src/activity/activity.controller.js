@@ -260,6 +260,84 @@ class ActivityController {
       res.status(500).json({ error: 'Error while getting like count' });
     }
   }
+  async getCommentsAndRepliesForPost(req, res) {
+    const { postId, commentId } = req.params; // ID поста или комментария
+    const { type, page = 1, limit = 5 } = req.query; // Тип данных и параметры пагинации
+
+    const limitInt = parseInt(limit, 10) || 5; // Количество элементов на странице
+    const offset = (parseInt(page, 10) - 1) * limitInt; // Смещение для пагинации
+
+    try {
+      let totalItems = 0;
+      let items = [];
+
+      // Определяем, что ищем: комментарии к посту или ответы к комментарию
+      if (type === 'comment') {
+        // Проверяем существование поста
+        const post = await Posts.findByPk(postId);
+        if (!post) {
+          return res.status(404).json({ error: 'Post not found' });
+        }
+
+        // Получаем общее количество комментариев
+        totalItems = await Activity.count({
+          where: { type: 'comment', postId },
+        });
+
+        // Получаем комментарии с пагинацией
+        items = await Activity.findAll({
+          where: { type: 'comment', postId },
+          order: [['createdAt', 'ASC']],
+          limit: limitInt,
+          offset,
+        });
+      } else if (type === 'reply') {
+        // Проверяем существование комментария
+        const comment = await Activity.findOne({
+          where: { id: commentId, type: 'comment' },
+        });
+        if (!comment) {
+          return res.status(404).json({ error: 'Comment not found' });
+        }
+
+        // Получаем общее количество ответов
+        totalItems = await Activity.count({
+          where: { type: 'reply', commentId },
+        });
+
+        // Получаем ответы с пагинацией
+        items = await Activity.findAll({
+          where: { type: 'reply', commentId },
+          order: [['createdAt', 'ASC']],
+          limit: limitInt,
+          offset,
+        });
+      } else {
+        return res.status(400).json({
+          error: 'Invalid type. Valid values are "comment" or "reply".',
+        });
+      }
+
+      // Вычисляем общее количество страниц
+      const totalPages = Math.ceil(totalItems / limitInt);
+
+      // Возвращаем данные и мета-данные для пагинации
+      res.status(200).json({
+        items,
+        meta: {
+          totalItems,
+          currentPage: parseInt(page, 10),
+          totalPages,
+          limit: limitInt,
+        },
+      });
+    } catch (err) {
+      console.error('Error fetching comments or replies:', err);
+      res
+        .status(500)
+        .json({ error: 'Error while fetching comments or replies' });
+    }
+  }
 }
 
 // Экспортируем экземпляр класса ActivityController

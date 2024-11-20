@@ -43,7 +43,7 @@ Posts.init(
     sequelize: dbPosts,
     modelName: 'Posts',
     tableName: 'posts',
-    timestamps: false,
+    timestamps: true,
   }
 );
 

@@ -4,13 +4,14 @@ import User, { ConfirmationToken } from './users.model.js';
 import jwt, { decode } from 'jsonwebtoken';
 import { config } from '../../config.js';
 import nodemailer from 'nodemailer';
+import axios from 'axios';
 
 const ACCESS_TOKEN_EXPIRES = '10m'; // 15 минут
 const REFRESH_TOKEN_EXPIRES = '30d'; // 30 дней
 
 class UsersController {
   async register(req, res) {
-    const { name, surname, email, password } = req.body;
+    const { name, surname, email, password, city } = req.body;
 
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
@@ -21,6 +22,7 @@ class UsersController {
         surname,
         email,
         password: hashedPassword,
+        city, // Добавляем город
         status: 'inactive',
       });
 
@@ -264,20 +266,44 @@ class UsersController {
 
   async getUsers(req, res) {
     const userRole = req.user.role; // Роль текущего пользователя из токена
+    const { page = 1, limit = 5 } = req.query; // Устанавливаем 5 пользователей на странице по умолчанию
 
-    // Если роль пользователя "user", возвращаем ошибку доступа
     if (userRole === 'user') {
       return res
         .status(403)
         .json({ error: 'Access denied. Insufficient permissions.' });
     }
 
+    const limitInt = parseInt(limit, 10) || 5; // Лимит пользователей (по умолчанию 5)
+    const offset = (parseInt(page, 10) - 1) * limitInt; // Смещение для текущей страницы
+
     try {
-      // Если роль администратора, возвращаем всех пользователей
-      const users = await User.findAll();
-      res.json(users);
+      // Получаем общее количество пользователей
+      const totalUsers = await User.count();
+
+      // Получаем пользователей для текущей страницы
+      const users = await User.findAll({
+        limit: limitInt,
+        offset,
+        order: [['createdAt', 'DESC']], // Сортировка по дате создания
+      });
+
+      // Вычисляем общее количество страниц
+      const totalPages = Math.ceil(totalUsers / limitInt);
+
+      // Возвращаем пользователей и мета-данные для пагинации
+      res.status(200).json({
+        users,
+        meta: {
+          totalUsers,
+          currentPage: parseInt(page, 10),
+          totalPages,
+          limit: limitInt,
+        },
+      });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      console.error('Error fetching paginated users:', error);
+      res.status(500).json({ error: 'Error while fetching paginated users' });
     }
   }
 
@@ -337,6 +363,72 @@ class UsersController {
       res.json({ message: 'Profile updated successfully', user });
     } catch (error) {
       res.status(500).json({ error: error.message });
+    }
+  }
+  async getWeatherForUser(req, res) {
+    const userId = req.user.userId;
+
+    try {
+      // Находим пользователя по userId
+      const user = await User.findByPk(userId);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      if (!user.city) {
+        return res.status(400).json({ error: 'User has not set a city.' });
+      }
+
+      // Логируем город пользователя
+      console.log('Fetching weather for city:', user.city);
+
+      // Отправляем запрос к API
+      const weatherResponse = await axios.get(
+        'https://api.weatherstack.com/current',
+        {
+          params: {
+            access_key: config.WEATHER_API_KEY,
+            query: user.city,
+            // units: 'm',
+            // language: 'ru',
+          },
+        }
+      );
+
+      // Логируем данные, которые пришли от API
+      console.log('Weather API response:', weatherResponse.data);
+
+      const { location, current } = weatherResponse.data;
+
+      if (!location || !current) {
+        return res
+          .status(500)
+          .json({ error: 'Unable to retrieve weather data.' });
+      }
+
+      res.status(200).json({
+        location: {
+          name: location.name,
+          region: location.region,
+          country: location.country,
+          localtime: location.localtime,
+        },
+        current: {
+          temperature: current.temperature,
+          feelslike: current.feelslike,
+          weather: current.weather_descriptions[0],
+          icon: current.weather_icons[0],
+          wind_speed: current.wind_speed,
+          wind_direction: current.wind_dir,
+          humidity: current.humidity,
+          visibility: current.visibility,
+          cloud_cover: current.cloudcover,
+          pressure: current.pressure,
+        },
+      });
+    } catch (error) {
+      console.error('Error fetching weather:', error.message);
+      res.status(500).json({ error: 'Error while fetching weather data.' });
     }
   }
 }
