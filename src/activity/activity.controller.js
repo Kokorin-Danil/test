@@ -3,6 +3,7 @@ import Posts from '../posts/posts.model.js';
 import User from '../users/users.model.js';
 import { Op } from 'sequelize';
 import { notifyUser } from '../../websocket.js';
+import dbPosts from '../../db.js';
 
 const entityTypes = {
   post: {
@@ -30,6 +31,8 @@ class ActivityController {
     const { type, id } = req.params;
     const { userId } = req.user;
 
+    const t = await dbPosts.transaction(); // Теперь используем dbPosts для транзакции
+
     try {
       // Проверяем, поддерживается ли тип
       if (!entityTypes[type]) {
@@ -44,6 +47,7 @@ class ActivityController {
             type: entityTypes[type].validType,
           }),
         },
+        transaction: t, // Используем транзакцию для этой операции
       });
 
       if (!entity) {
@@ -59,23 +63,26 @@ class ActivityController {
         [entityTypes[type].foreignKey]: id,
       };
 
-      const existingLike = await Activity.findOne({ where: likeCondition });
+      const existingLike = await Activity.findOne({
+        where: likeCondition,
+        transaction: t,
+      }); // Используем транзакцию
 
       let message;
       if (existingLike) {
         // Удаляем лайк
-        await existingLike.destroy();
+        await existingLike.destroy({ transaction: t }); // Используем транзакцию
         if (type === 'post') {
           entity.likes -= 1;
-          await entity.save();
+          await entity.save({ transaction: t }); // Используем транзакцию
         }
         message = 'Like removed.';
       } else {
         // Добавляем лайк
-        await Activity.create(likeCondition);
+        await Activity.create(likeCondition, { transaction: t }); // Используем транзакцию
         if (type === 'post') {
           entity.likes += 1;
-          await entity.save();
+          await entity.save({ transaction: t }); // Используем транзакцию
 
           // Уведомляем автора поста
           if (entity.userId !== userId) {
@@ -93,8 +100,11 @@ class ActivityController {
         message = 'Like added.';
       }
 
+      await t.commit(); // Завершаем транзакцию
+
       res.status(200).json({ message });
     } catch (err) {
+      await t.rollback(); // В случае ошибки откатываем транзакцию
       console.error('Error toggling like:', err);
       res.status(500).json({ error: 'Error while toggling like.' });
     }
@@ -106,13 +116,13 @@ class ActivityController {
     const { content } = req.body;
     const { userId } = req.user;
 
+    const t = await dbPosts.transaction(); // Создание транзакции
+
     try {
-      // Проверяем, поддерживается ли тип
       if (!entityTypes[type]) {
         return res.status(400).json({ error: 'Invalid type.' });
       }
 
-      // Находим сущность, к которой добавляем комментарий/ответ
       const entity = await entityTypes[type].model.findOne({
         where: {
           id,
@@ -120,6 +130,7 @@ class ActivityController {
             type: entityTypes[type].validType,
           }),
         },
+        transaction: t, // Указываем транзакцию
       });
 
       if (!entity) {
@@ -128,7 +139,6 @@ class ActivityController {
           .json({ error: `${entityTypes[type].name} not found.` });
       }
 
-      // Определяем тип создаваемой активности
       const activityType = type === 'post' ? 'comment' : 'reply';
       const activityData = {
         type: activityType,
@@ -137,15 +147,12 @@ class ActivityController {
         [entityTypes[type].foreignKey]: id,
       };
 
-      // Создаём запись в таблице Activity
-      const activity = await Activity.create(activityData);
+      const activity = await Activity.create(activityData, { transaction: t }); // Создаем комментарий/ответ в транзакции
 
-      // Обновляем счётчики комментариев, если это пост
       if (type === 'post') {
         entity.commentCount += 1;
-        await entity.save();
+        await entity.save({ transaction: t }); // Обновляем счетчик комментариев в транзакции
 
-        // Уведомляем автора поста
         if (entity.userId !== userId) {
           notifyUser(entity.userId, {
             type: 'new_comment',
@@ -159,11 +166,13 @@ class ActivityController {
         }
       }
 
+      await t.commit(); // Коммитим транзакцию
       res.status(201).json({
         message: `${type === 'post' ? 'Comment' : 'Reply'} added.`,
         activity,
       });
     } catch (err) {
+      await t.rollback(); // Откатываем транзакцию в случае ошибки
       console.error('Error creating comment or reply:', err);
       res.status(500).json({ error: 'Error while creating comment or reply.' });
     }
