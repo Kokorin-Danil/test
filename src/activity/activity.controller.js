@@ -260,11 +260,11 @@ class ActivityController {
       res.status(500).json({ error: 'Error while getting like count' });
     }
   }
-  async getCommentsAndRepliesForPost(req, res) {
-    const { postId, commentId } = req.params; // ID поста или комментария
-    const { type, page = 1, limit = 5 } = req.query; // Тип данных и параметры пагинации
+  async getCommentsAndReplies(req, res) {
+    const { id, type } = req.params; // Универсальный ID и тип данных
+    const { page = 1, limit = 5 } = req.query; // Параметры пагинации
 
-    const limitInt = parseInt(limit, 10) || 5; // Количество элементов на странице
+    const limitInt = parseInt(limit, 10) || 5; // Лимит элементов на страницу
     const offset = (parseInt(page, 10) - 1) * limitInt; // Смещение для пагинации
 
     try {
@@ -274,19 +274,19 @@ class ActivityController {
       // Определяем, что ищем: комментарии к посту или ответы к комментарию
       if (type === 'comment') {
         // Проверяем существование поста
-        const post = await Posts.findByPk(postId);
+        const post = await Posts.findByPk(id);
         if (!post) {
           return res.status(404).json({ error: 'Post not found' });
         }
 
         // Получаем общее количество комментариев
         totalItems = await Activity.count({
-          where: { type: 'comment', postId },
+          where: { type: 'comment', postId: id },
         });
 
         // Получаем комментарии с пагинацией
         items = await Activity.findAll({
-          where: { type: 'comment', postId },
+          where: { type: 'comment', postId: id },
           order: [['createdAt', 'ASC']],
           limit: limitInt,
           offset,
@@ -294,7 +294,7 @@ class ActivityController {
       } else if (type === 'reply') {
         // Проверяем существование комментария
         const comment = await Activity.findOne({
-          where: { id: commentId, type: 'comment' },
+          where: { id, type: 'comment' },
         });
         if (!comment) {
           return res.status(404).json({ error: 'Comment not found' });
@@ -302,12 +302,12 @@ class ActivityController {
 
         // Получаем общее количество ответов
         totalItems = await Activity.count({
-          where: { type: 'reply', commentId },
+          where: { type: 'reply', commentId: id },
         });
 
         // Получаем ответы с пагинацией
         items = await Activity.findAll({
-          where: { type: 'reply', commentId },
+          where: { type: 'reply', commentId: id },
           order: [['createdAt', 'ASC']],
           limit: limitInt,
           offset,
