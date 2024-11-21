@@ -5,254 +5,211 @@ import { Op } from 'sequelize';
 import { notifyUser } from '../../websocket.js';
 
 class ActivityController {
-  // Лайк на пост
-  async toggleLikeOnPost(req, res) {
-    const { postId } = req.params;
-    const { userId } = req.user; // Извлекаем userId из токена
+  // Лайк
+  async toggleLike(req, res) {
+    const { type, id } = req.params; // Тип объекта (post, comment, reply) и его ID
+    const { userId } = req.user; // ID пользователя из токена
 
     try {
-      // Проверка, что пост существует
-      const post = await Posts.findByPk(postId);
-      if (!post) {
-        return res.status(404).json({ error: 'Post not found' });
+      let targetObject; // Объект, к которому применяется лайк
+      let likeCondition; // Условие для поиска существующего лайка
+
+      // Определяем, что мы лайкаем
+      if (type === 'post') {
+        targetObject = await Posts.findByPk(id);
+        if (!targetObject) {
+          return res.status(404).json({ error: 'Post not found' });
+        }
+        likeCondition = { type: 'like', postId: id, userId };
+      } else if (type === 'comment' || type === 'reply') {
+        targetObject = await Activity.findOne({
+          where: { id, type: type === 'comment' ? 'comment' : 'reply' },
+        });
+        if (!targetObject) {
+          return res.status(404).json({
+            error: `${type === 'comment' ? 'Comment' : 'Reply'} not found`,
+          });
+        }
+        likeCondition = { type: 'like', commentId: id, userId };
+      } else {
+        return res.status(400).json({
+          error: 'Invalid type. Valid types are "post", "comment", "reply".',
+        });
       }
 
-      // Проверка, существует ли уже активность "like" от данного пользователя для этого поста
-      const existingLike = await Activity.findOne({
-        where: { type: 'like', postId, userId },
-      });
+      // Проверяем, существует ли уже лайк
+      const existingLike = await Activity.findOne({ where: likeCondition });
 
       if (existingLike) {
         // Если лайк существует, удаляем его
         await existingLike.destroy();
 
-        // Уменьшаем количество лайков на посте
-        post.likes -= 1;
-        await post.save();
-
-        return res.status(200).json({ message: 'Unliked the post' });
-      } else {
-        // Если лайк не существует, добавляем его
-        await Activity.create({
-          type: 'like',
-          userId,
-          postId,
-        });
-
-        if (post.userId !== userId) {
-          console.log(
-            `Sending notification to user ${post.userId} about new like...`
-          );
-          notifyUser(post.userId, {
-            type: 'new_like',
-            message: `Ваш пост получил новый лайк!`,
-            data: {
-              postId: post.id,
-              likedBy: {
-                userId,
-                username: req.user.name, // Убедитесь, что это свойство есть в токене
-              },
-              timestamp: new Date().toISOString(),
-            },
-          });
+        if (type === 'post') {
+          targetObject.likes -= 1;
+          await targetObject.save();
         }
 
-        // Увеличиваем количество лайков на посте
-        post.likes += 1;
-        await post.save();
+        return res.status(200).json({ message: 'Like removed' });
+      } else {
+        // Если лайка нет, создаем новый
+        const newLikeData = { type: 'like', userId };
+        if (type === 'post') {
+          newLikeData.postId = id;
+        } else {
+          newLikeData.commentId = id;
+        }
 
-        return res.status(200).json({ message: 'Liked the post' });
+        await Activity.create(newLikeData);
+
+        if (type === 'post') {
+          if (targetObject.userId !== userId) {
+            console.log(
+              `Sending notification to user ${targetObject.userId} about new like...`
+            );
+            notifyUser(targetObject.userId, {
+              type: 'new_like',
+              message: `Ваш пост получил новый лайк!`,
+              data: {
+                postId: targetObject.id,
+                likedBy: {
+                  userId,
+                  username: req.user.name,
+                },
+                timestamp: new Date().toISOString(),
+              },
+            });
+          }
+
+          targetObject.likes += 1;
+          await targetObject.save();
+        }
+
+        return res.status(200).json({ message: 'Like added' });
       }
     } catch (err) {
-      console.error(err);
+      console.error('Error while toggling like:', err);
       res.status(500).json({ error: 'Error while toggling the like' });
     }
   }
 
   // Создание комментария
-  async createComment(req, res) {
-    const { postId } = req.params;
-    const { content } = req.body;
-    const { userId } = req.user;
+  async createCommentOrReply(req, res) {
+    const { type, id } = req.params; // Тип объекта (post, comment, reply) и его ID
+    const { content } = req.body; // Содержимое комментария или ответа
+    const { userId } = req.user; // ID пользователя из токена
 
     try {
-      // Проверяем, что пост существует
-      const post = await Posts.findByPk(postId);
-      if (!post) {
-        return res.status(404).json({ error: 'Post not found' });
-      }
+      let targetObject; // Объект, к которому добавляется комментарий/ответ
+      let newActivityData; // Данные для создания активности
 
-      // Создаем запись о комментарии как активность
-      const activity = await Activity.create({
-        type: 'comment',
-        userId,
-        postId,
-        content,
-      });
+      if (type === 'post') {
+        // Проверяем, что пост существует
+        targetObject = await Posts.findByPk(id);
+        if (!targetObject) {
+          return res.status(404).json({ error: 'Post not found' });
+        }
 
-      // Увеличиваем количество комментариев на посте
-      post.commentCount += 1;
-      await post.save();
+        // Формируем данные для нового комментария
+        newActivityData = {
+          type: 'comment',
+          userId,
+          postId: id,
+          content,
+        };
 
-      // Отправляем уведомление создателю поста
-      if (post.userId !== userId) {
-        notifyUser(post.userId, {
-          type: 'new_comment',
-          message: `Ваш пост получил новый комментарий: "${content}"`,
-          data: {
-            postId: post.id,
-            commentId: activity.id,
-            commentedBy: {
-              userId,
-              username: req.user.username, // Убедитесь, что это свойство есть в токене
+        // Увеличиваем количество комментариев на посте
+        targetObject.commentCount += 1;
+        await targetObject.save();
+
+        // Уведомляем автора поста
+        if (targetObject.userId !== userId) {
+          notifyUser(targetObject.userId, {
+            type: 'new_comment',
+            message: `Ваш пост получил новый комментарий: "${content}"`,
+            data: {
+              postId: targetObject.id,
+              commentedBy: {
+                userId,
+                username: req.user.username,
+              },
+              timestamp: new Date().toISOString(),
             },
-            timestamp: new Date().toISOString(),
-          },
+          });
+        }
+      } else if (type === 'comment' || type === 'reply') {
+        // Проверяем, что комментарий или ответ существует
+        targetObject = await Activity.findByPk(id);
+        if (
+          !targetObject ||
+          !['comment', 'reply'].includes(targetObject.type)
+        ) {
+          return res.status(404).json({ error: 'Comment or reply not found' });
+        }
+
+        // Формируем данные для нового ответа
+        newActivityData = {
+          type: 'reply',
+          userId,
+          commentId:
+            targetObject.type === 'comment' ? id : targetObject.commentId, // ID родительского комментария
+          content,
+        };
+      } else {
+        return res.status(400).json({
+          error: 'Invalid type. Valid types are "post", "comment", or "reply".',
         });
       }
 
-      res.status(201).json({ message: 'Comment added', activity });
+      // Создаем активность (комментарий или ответ)
+      const activity = await Activity.create(newActivityData);
+
+      res.status(201).json({
+        message: `${type === 'post' ? 'Comment' : 'Reply'} added`,
+        activity,
+      });
     } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'Error while adding the comment' });
-    }
-  }
-
-  // Лайк на комментарий
-  async toggleLikeOnComment(req, res) {
-    const { commentId } = req.params; // Получаем id комментария
-    const { userId } = req.user; // Получаем id пользователя
-
-    try {
-      // Проверяем, что это комментарий или ответ
-      const comment = await Activity.findOne({
-        where: {
-          id: commentId,
-          type: ['comment', 'reply'], // Только комментарии или ответы
-        },
-      });
-
-      if (!comment) {
-        return res.status(404).json({ error: 'Comment or reply not found' });
-      }
-
-      // Проверяем, есть ли уже лайк от этого пользователя
-      const like = await Activity.findOne({
-        where: {
-          userId,
-          type: 'like', // Тип активности лайк
-          commentId,
-        },
-      });
-
-      if (like) {
-        // Если лайк уже существует, удаляем его
-        await like.destroy();
-        return res.status(200).json({ message: 'Like removed from comment' });
-      }
-
-      // Если лайк не найден, создаём новый лайк
-      await Activity.create({
-        type: 'like',
-        userId,
-        commentId,
-      });
-
-      res.status(200).json({ message: 'Like added to comment' });
-    } catch (err) {
-      console.error(err);
+      console.error('Error while adding comment or reply:', err);
       res
         .status(500)
-        .json({ error: 'Error while liking or unliking the comment' });
+        .json({ error: 'Error while adding the comment or reply' });
     }
   }
 
-  // Ответ на комментарий
-  async createReply(req, res) {
-    const { commentId } = req.params;
-    const { content } = req.body;
-    const { userId } = req.user;
+  async getLikeCount(req, res) {
+    const { type, id } = req.params; // Получаем тип объекта (post, comment, reply) и его ID
 
     try {
-      const comment = await Activity.findByPk(commentId);
-      if (!comment || comment.type !== 'comment') {
-        return res.status(404).json({ error: 'Comment not found' });
-      }
+      let condition = {};
 
-      // Создаем ответ как активность
-      const reply = await Activity.create({
-        type: 'reply',
-        userId,
-        commentId,
-        content,
-      });
+      if (type === 'post') {
+        // Проверяем, существует ли пост
+        const post = await Posts.findByPk(id);
+        if (!post) {
+          return res.status(404).json({ error: 'Post not found' });
+        }
 
-      res.status(201).json({ message: 'Reply added', reply });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'Error while adding the reply' });
-    }
-  }
+        condition = { postId: id, type: 'like' };
+      } else if (type === 'comment' || type === 'reply') {
+        // Проверяем, существует ли комментарий или ответ
+        const activity = await Activity.findOne({
+          where: { id, type: type === 'comment' ? 'comment' : 'reply' },
+        });
 
-  // Получение количества лайков на пост
-  async getLikeCountOnPost(req, res) {
-    const { postId } = req.params; // Получаем postId из параметров
+        if (!activity) {
+          return res.status(404).json({
+            error: `${type === 'comment' ? 'Comment' : 'Reply'} not found`,
+          });
+        }
 
-    try {
-      // Проверяем, существует ли пост с таким ID
-      const post = await Posts.findByPk(postId);
-      if (!post) {
-        return res.status(404).json({ error: 'Post not found' });
-      }
-
-      // Считаем количество лайков только на этом посте
-      const likeCount = await Activity.count({
-        where: {
-          postId,
-          type: 'like', // Только лайки
-        },
-      });
-
-      res.status(200).json({ likeCount });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'Error while getting like count on post' });
-    }
-  }
-
-  // Получение количества лайков на комментарии
-  async getLikeCountOnComment(req, res) {
-    const { id } = req.params; // Получаем ID из параметров маршрута
-
-    // Проверяем, передан ли параметр ID
-    if (!id) {
-      return res.status(400).json({ error: 'The ID parameter is required.' });
-    }
-
-    try {
-      // Проверяем, существует ли активность с таким ID и что это "comment" или "reply"
-      const activity = await Activity.findOne({
-        where: {
-          id: Number(id), // Убедимся, что ID передан как число
-          type: {
-            [Op.in]: ['comment', 'reply'], // Тип должен быть "comment" или "reply"
-          },
-        },
-      });
-
-      if (!activity) {
-        return res.status(404).json({
-          error: 'The specified ID does not correspond to a comment or reply.',
+        condition = { commentId: id, type: 'like' };
+      } else {
+        return res.status(400).json({
+          error: 'Invalid type. Valid types are "post", "comment", or "reply".',
         });
       }
 
-      // Считаем количество лайков для указанного комментария или ответа
-      const likeCount = await Activity.count({
-        where: {
-          commentId: id,
-          type: 'like',
-        },
-      });
+      // Считаем количество лайков
+      const likeCount = await Activity.count({ where: condition });
 
       res.status(200).json({ likeCount });
     } catch (err) {
@@ -260,6 +217,7 @@ class ActivityController {
       res.status(500).json({ error: 'Error while getting like count' });
     }
   }
+
   async getCommentsAndReplies(req, res) {
     const { id, type } = req.params; // Универсальный ID и тип данных
     const { page = 1, limit = 5 } = req.query; // Параметры пагинации

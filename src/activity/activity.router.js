@@ -4,47 +4,28 @@ import middlewaresController from '../middlewares/middlewares.controller.js';
 
 const activityRouter = express.Router();
 
-// Лайк на пост
+// Лайк
 activityRouter.post(
-  '/:postId/like',
+  '/:type/:id/like', // типы: post, comment, reply
   middlewaresController.authenticateToken,
-  activityController.toggleLikeOnPost
+  activityController.toggleLike
 );
 
-// Комментарий к посту
+// Создание комментариев
 activityRouter.post(
-  '/:postId/comment',
+  '/:type/:id/comment', // типы: post, comment, reply
   middlewaresController.authenticateToken,
-  activityController.createComment
+  activityController.createCommentOrReply
 );
-
-// Лайк на комментарий
-activityRouter.post(
-  '/comment/:commentId/like',
-  middlewaresController.authenticateToken,
-  activityController.toggleLikeOnComment
-);
-
-// Ответ на комментарий
-activityRouter.post(
-  '/:commentId/reply',
-  middlewaresController.authenticateToken,
-  activityController.createReply
-);
-
-// Получение количества лайков на пост
+// Получение количества лайков
 activityRouter.get(
-  '/:postId/likeCountPost',
-  activityController.getLikeCountOnPost
+  '/:type/:id/likeCount', // типы: post, comment, reply
+  middlewaresController.authenticateToken,
+  activityController.getLikeCount
 );
-
-// Получение количества лайков на комментарий
+// Получение комментариев
 activityRouter.get(
-  '/:id/likeCountComment',
-  activityController.getLikeCountOnComment
-);
-activityRouter.get(
-  '/:id/:type/comments',
+  '/:id/:type/comments', //типы: comment, reply
   activityController.getCommentsAndReplies
 );
 
