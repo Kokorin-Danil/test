@@ -11,7 +11,7 @@ activityRouter.post(
   activityController.toggleLike
 );
 
-// Создание комментариев
+// Создание комментария
 activityRouter.post(
   '/:type/:id/comment', // типы: post, comment, reply
   middlewaresController.authenticateToken,

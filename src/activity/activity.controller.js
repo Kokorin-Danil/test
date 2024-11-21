@@ -4,282 +4,266 @@ import User from '../users/users.model.js';
 import { Op } from 'sequelize';
 import { notifyUser } from '../../websocket.js';
 
+const entityTypes = {
+  post: {
+    model: Posts,
+    name: 'Post',
+    foreignKey: 'postId',
+  },
+  comment: {
+    model: Activity,
+    name: 'Comment',
+    foreignKey: 'commentId',
+    validType: 'comment',
+  },
+  reply: {
+    model: Activity,
+    name: 'Reply',
+    foreignKey: 'commentId',
+    validType: 'reply',
+  },
+};
+
 class ActivityController {
-  // Лайк
+  // Универсальная функция для лайков
   async toggleLike(req, res) {
-    const { type, id } = req.params; // Тип объекта (post, comment, reply) и его ID
-    const { userId } = req.user; // ID пользователя из токена
+    const { type, id } = req.params;
+    const { userId } = req.user;
 
     try {
-      let targetObject; // Объект, к которому применяется лайк
-      let likeCondition; // Условие для поиска существующего лайка
-
-      // Определяем, что мы лайкаем
-      if (type === 'post') {
-        targetObject = await Posts.findByPk(id);
-        if (!targetObject) {
-          return res.status(404).json({ error: 'Post not found' });
-        }
-        likeCondition = { type: 'like', postId: id, userId };
-      } else if (type === 'comment' || type === 'reply') {
-        targetObject = await Activity.findOne({
-          where: { id, type: type === 'comment' ? 'comment' : 'reply' },
-        });
-        if (!targetObject) {
-          return res.status(404).json({
-            error: `${type === 'comment' ? 'Comment' : 'Reply'} not found`,
-          });
-        }
-        likeCondition = { type: 'like', commentId: id, userId };
-      } else {
-        return res.status(400).json({
-          error: 'Invalid type. Valid types are "post", "comment", "reply".',
-        });
+      // Проверяем, поддерживается ли тип
+      if (!entityTypes[type]) {
+        return res.status(400).json({ error: 'Invalid type.' });
       }
 
-      // Проверяем, существует ли уже лайк
+      // Ищем объект, который лайкаем
+      const entity = await entityTypes[type].model.findOne({
+        where: {
+          id,
+          ...(entityTypes[type].validType && {
+            type: entityTypes[type].validType,
+          }),
+        },
+      });
+
+      if (!entity) {
+        return res
+          .status(404)
+          .json({ error: `${entityTypes[type].name} not found.` });
+      }
+
+      // Проверяем, существует ли лайк
+      const likeCondition = {
+        type: 'like',
+        userId,
+        [entityTypes[type].foreignKey]: id,
+      };
+
       const existingLike = await Activity.findOne({ where: likeCondition });
 
+      let message;
       if (existingLike) {
-        // Если лайк существует, удаляем его
+        // Удаляем лайк
         await existingLike.destroy();
-
         if (type === 'post') {
-          targetObject.likes -= 1;
-          await targetObject.save();
+          entity.likes -= 1;
+          await entity.save();
         }
-
-        return res.status(200).json({ message: 'Like removed' });
+        message = 'Like removed.';
       } else {
-        // Если лайка нет, создаем новый
-        const newLikeData = { type: 'like', userId };
+        // Добавляем лайк
+        await Activity.create(likeCondition);
         if (type === 'post') {
-          newLikeData.postId = id;
-        } else {
-          newLikeData.commentId = id;
-        }
+          entity.likes += 1;
+          await entity.save();
 
-        await Activity.create(newLikeData);
-
-        if (type === 'post') {
-          if (targetObject.userId !== userId) {
-            console.log(
-              `Sending notification to user ${targetObject.userId} about new like...`
-            );
-            notifyUser(targetObject.userId, {
+          // Уведомляем автора поста
+          if (entity.userId !== userId) {
+            notifyUser(entity.userId, {
               type: 'new_like',
               message: `Ваш пост получил новый лайк!`,
               data: {
-                postId: targetObject.id,
-                likedBy: {
-                  userId,
-                  username: req.user.name,
-                },
+                postId: entity.id,
+                likedBy: { userId, username: req.user.name },
                 timestamp: new Date().toISOString(),
               },
             });
           }
-
-          targetObject.likes += 1;
-          await targetObject.save();
         }
-
-        return res.status(200).json({ message: 'Like added' });
+        message = 'Like added.';
       }
+
+      res.status(200).json({ message });
     } catch (err) {
-      console.error('Error while toggling like:', err);
-      res.status(500).json({ error: 'Error while toggling the like' });
+      console.error('Error toggling like:', err);
+      res.status(500).json({ error: 'Error while toggling like.' });
     }
   }
 
-  // Создание комментария
+  // Универсальная функция для создания комментариев/ответов
   async createCommentOrReply(req, res) {
-    const { type, id } = req.params; // Тип объекта (post, comment, reply) и его ID
-    const { content } = req.body; // Содержимое комментария или ответа
-    const { userId } = req.user; // ID пользователя из токена
+    const { type, id } = req.params;
+    const { content } = req.body;
+    const { userId } = req.user;
 
     try {
-      let targetObject; // Объект, к которому добавляется комментарий/ответ
-      let newActivityData; // Данные для создания активности
+      // Проверяем, поддерживается ли тип
+      if (!entityTypes[type]) {
+        return res.status(400).json({ error: 'Invalid type.' });
+      }
 
+      // Находим сущность, к которой добавляем комментарий/ответ
+      const entity = await entityTypes[type].model.findOne({
+        where: {
+          id,
+          ...(entityTypes[type].validType && {
+            type: entityTypes[type].validType,
+          }),
+        },
+      });
+
+      if (!entity) {
+        return res
+          .status(404)
+          .json({ error: `${entityTypes[type].name} not found.` });
+      }
+
+      // Определяем тип создаваемой активности
+      const activityType = type === 'post' ? 'comment' : 'reply';
+      const activityData = {
+        type: activityType,
+        userId,
+        content,
+        [entityTypes[type].foreignKey]: id,
+      };
+
+      // Создаём запись в таблице Activity
+      const activity = await Activity.create(activityData);
+
+      // Обновляем счётчики комментариев, если это пост
       if (type === 'post') {
-        // Проверяем, что пост существует
-        targetObject = await Posts.findByPk(id);
-        if (!targetObject) {
-          return res.status(404).json({ error: 'Post not found' });
-        }
-
-        // Формируем данные для нового комментария
-        newActivityData = {
-          type: 'comment',
-          userId,
-          postId: id,
-          content,
-        };
-
-        // Увеличиваем количество комментариев на посте
-        targetObject.commentCount += 1;
-        await targetObject.save();
+        entity.commentCount += 1;
+        await entity.save();
 
         // Уведомляем автора поста
-        if (targetObject.userId !== userId) {
-          notifyUser(targetObject.userId, {
+        if (entity.userId !== userId) {
+          notifyUser(entity.userId, {
             type: 'new_comment',
             message: `Ваш пост получил новый комментарий: "${content}"`,
             data: {
-              postId: targetObject.id,
-              commentedBy: {
-                userId,
-                username: req.user.username,
-              },
+              postId: entity.id,
+              commentedBy: { userId, username: req.user.username },
               timestamp: new Date().toISOString(),
             },
           });
         }
-      } else if (type === 'comment' || type === 'reply') {
-        // Проверяем, что комментарий или ответ существует
-        targetObject = await Activity.findByPk(id);
-        if (
-          !targetObject ||
-          !['comment', 'reply'].includes(targetObject.type)
-        ) {
-          return res.status(404).json({ error: 'Comment or reply not found' });
-        }
-
-        // Формируем данные для нового ответа
-        newActivityData = {
-          type: 'reply',
-          userId,
-          commentId:
-            targetObject.type === 'comment' ? id : targetObject.commentId, // ID родительского комментария
-          content,
-        };
-      } else {
-        return res.status(400).json({
-          error: 'Invalid type. Valid types are "post", "comment", or "reply".',
-        });
       }
 
-      // Создаем активность (комментарий или ответ)
-      const activity = await Activity.create(newActivityData);
-
       res.status(201).json({
-        message: `${type === 'post' ? 'Comment' : 'Reply'} added`,
+        message: `${type === 'post' ? 'Comment' : 'Reply'} added.`,
         activity,
       });
     } catch (err) {
-      console.error('Error while adding comment or reply:', err);
-      res
-        .status(500)
-        .json({ error: 'Error while adding the comment or reply' });
+      console.error('Error creating comment or reply:', err);
+      res.status(500).json({ error: 'Error while creating comment or reply.' });
     }
   }
 
+  // Универсальная функция для подсчёта лайков
   async getLikeCount(req, res) {
-    const { type, id } = req.params; // Получаем тип объекта (post, comment, reply) и его ID
+    const { type, id } = req.params;
 
     try {
-      let condition = {};
-
-      if (type === 'post') {
-        // Проверяем, существует ли пост
-        const post = await Posts.findByPk(id);
-        if (!post) {
-          return res.status(404).json({ error: 'Post not found' });
-        }
-
-        condition = { postId: id, type: 'like' };
-      } else if (type === 'comment' || type === 'reply') {
-        // Проверяем, существует ли комментарий или ответ
-        const activity = await Activity.findOne({
-          where: { id, type: type === 'comment' ? 'comment' : 'reply' },
-        });
-
-        if (!activity) {
-          return res.status(404).json({
-            error: `${type === 'comment' ? 'Comment' : 'Reply'} not found`,
-          });
-        }
-
-        condition = { commentId: id, type: 'like' };
-      } else {
-        return res.status(400).json({
-          error: 'Invalid type. Valid types are "post", "comment", or "reply".',
-        });
+      // Проверяем, поддерживается ли тип
+      if (!entityTypes[type]) {
+        return res.status(400).json({ error: 'Invalid type.' });
       }
 
-      // Считаем количество лайков
-      const likeCount = await Activity.count({ where: condition });
+      // Проверяем существование сущности
+      const entity = await entityTypes[type].model.findOne({
+        where: {
+          id,
+          ...(entityTypes[type].validType && {
+            type: entityTypes[type].validType,
+          }),
+        },
+      });
+
+      if (!entity) {
+        return res
+          .status(404)
+          .json({ error: `${entityTypes[type].name} not found.` });
+      }
+
+      // Подсчитываем лайки
+      const likeCount = await Activity.count({
+        where: {
+          type: 'like',
+          [entityTypes[type].foreignKey]: id,
+        },
+      });
 
       res.status(200).json({ likeCount });
     } catch (err) {
-      console.error('Error while getting like count:', err);
-      res.status(500).json({ error: 'Error while getting like count' });
+      console.error('Error getting like count:', err);
+      res.status(500).json({ error: 'Error while getting like count.' });
     }
   }
 
   async getCommentsAndReplies(req, res) {
-    const { id, type } = req.params; // Универсальный ID и тип данных
+    const { id, type } = req.params; // ID объекта и его тип (comment или reply)
     const { page = 1, limit = 5 } = req.query; // Параметры пагинации
-
-    const limitInt = parseInt(limit, 10) || 5; // Лимит элементов на страницу
+    const limitInt = parseInt(limit, 10) || 5; // Лимит элементов на странице
     const offset = (parseInt(page, 10) - 1) * limitInt; // Смещение для пагинации
 
     try {
-      let totalItems = 0;
-      let items = [];
-
-      // Определяем, что ищем: комментарии к посту или ответы к комментарию
+      // Унифицированная проверка объекта (post, comment или reply)
+      let targetObject;
       if (type === 'comment') {
-        // Проверяем существование поста
-        const post = await Posts.findByPk(id);
-        if (!post) {
+        targetObject = await Posts.findByPk(id);
+        if (!targetObject) {
           return res.status(404).json({ error: 'Post not found' });
         }
-
-        // Получаем общее количество комментариев
-        totalItems = await Activity.count({
-          where: { type: 'comment', postId: id },
-        });
-
-        // Получаем комментарии с пагинацией
-        items = await Activity.findAll({
-          where: { type: 'comment', postId: id },
-          order: [['createdAt', 'ASC']],
-          limit: limitInt,
-          offset,
-        });
       } else if (type === 'reply') {
-        // Проверяем существование комментария
-        const comment = await Activity.findOne({
+        targetObject = await Activity.findOne({
           where: { id, type: 'comment' },
         });
-        if (!comment) {
+        if (!targetObject) {
           return res.status(404).json({ error: 'Comment not found' });
         }
-
-        // Получаем общее количество ответов
-        totalItems = await Activity.count({
-          where: { type: 'reply', commentId: id },
-        });
-
-        // Получаем ответы с пагинацией
-        items = await Activity.findAll({
-          where: { type: 'reply', commentId: id },
-          order: [['createdAt', 'ASC']],
-          limit: limitInt,
-          offset,
-        });
       } else {
         return res.status(400).json({
           error: 'Invalid type. Valid values are "comment" or "reply".',
         });
       }
 
+      // Определяем условия выборки в зависимости от типа
+      const whereCondition =
+        type === 'comment'
+          ? { type: 'comment', postId: id }
+          : { type: 'reply', commentId: id };
+
+      // Считаем общее количество элементов
+      const totalItems = await Activity.count({ where: whereCondition });
+
+      // Получаем элементы с пагинацией
+      const items = await Activity.findAll({
+        where: whereCondition,
+        order: [['createdAt', 'ASC']], // Сортировка по времени создания
+        limit: limitInt,
+        offset,
+        include: [
+          {
+            model: User, // Модель User, без alias, так как alias не задан
+            attributes: ['id', 'name', 'surname'], // Выбираем только нужные поля
+          },
+        ],
+      });
+
       // Вычисляем общее количество страниц
       const totalPages = Math.ceil(totalItems / limitInt);
 
-      // Возвращаем данные и мета-данные для пагинации
+      // Возвращаем ответ с данными и мета-данными
       res.status(200).json({
         items,
         meta: {
